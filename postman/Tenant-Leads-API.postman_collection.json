@@ -1,0 +1,341 @@
+{
+  "info": {
+    "name": "ZuriBackend - Tenant Leads API",
+    "_postman_id": "0f0b4f52-3fb6-4c0a-9cf1-4a7d7afdc001",
+    "description": "Tenant authentication and Leads CRUD endpoints with sample payloads.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8099/api"
+    },
+    {
+      "key": "companyId",
+      "value": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "key": "tenantEmail",
+      "value": "tenant@example.com"
+    },
+    {
+      "key": "tenantPassword",
+      "value": "password123"
+    },
+    {
+      "key": "tenantToken",
+      "value": ""
+    },
+    {
+      "key": "assignedSalesPersonId",
+      "value": "1"
+    },
+    {
+      "key": "leadId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Tenant Auth",
+      "item": [
+        {
+          "name": "Tenant Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company_id\": \"{{companyId}}\",\n  \"email\": \"{{tenantEmail}}\",\n  \"password\": \"{{tenantPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tenant/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenant",
+                "login"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login successful', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "if (json.token) {",
+                  "  pm.collectionVariables.set('tenantToken', json.token);",
+                  "}",
+                  "if (json.user && json.user.company_id) {",
+                  "  pm.collectionVariables.set('companyId', json.user.company_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tenant Me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tenantToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/app/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "app",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Tenant Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tenantToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/app/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "app",
+                "logout"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Leads",
+      "item": [
+        {
+          "name": "Create Lead",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tenantToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"CUST-0001\",\n  \"lead_id\": \"LD-0001\",\n  \"full_name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phone_whatsapp\": \"+971555111222\",\n  \"country\": \"UAE\",\n  \"city\": \"Dubai\",\n  \"lead_source\": \"Website\",\n  \"travel_start_date\": \"2026-06-15\",\n  \"travel_end_date\": \"2026-06-21\",\n  \"number_of_days\": 7,\n  \"number_of_nights\": 6,\n  \"number_of_pax\": 4,\n  \"adults\": 2,\n  \"children\": 1,\n  \"infants\": 1,\n  \"preferred_destinations\": [\"Dubai\", \"Abu Dhabi\"],\n  \"trip_type\": \"Family Leisure\",\n  \"residency_type\": \"Tourist\",\n  \"budget_range\": \"Premium\",\n  \"estimated_budget_amount\": 8500,\n  \"preferred_vehicle\": \"SUV\",\n  \"accommodation_type\": \"Hotel\",\n  \"room_preference\": \"Connecting Rooms\",\n  \"meal_plan\": \"Half Board\",\n  \"activities_interested_in\": [\"Desert Safari\", \"Yacht Cruise\"],\n  \"special_interests\": \"Photography and culture\",\n  \"dietary_requirement\": \"Halal vegetarian options\",\n  \"language_preference\": \"English\",\n  \"guide_preference\": \"Arabic-speaking\",\n  \"lead_status\": \"new\",\n  \"assigned_sales_person_id\": {{assignedSalesPersonId}},\n  \"priority\": \"high\",\n  \"follow_up_date\": \"2026-05-20\",\n  \"follow_up_time\": \"10:30\",\n  \"next_action\": \"Share initial itinerary\",\n  \"quotation_status\": \"draft\",\n  \"probability_of_winning\": 65,\n  \"client_request_summary\": \"Luxury family trip with kid-friendly activities.\",\n  \"passport_visa_notes\": \"Passport copies to be shared; visa required.\",\n  \"internal_sales_notes\": \"Interested in upsell for premium transfers.\",\n  \"payment_special_conditions\": \"50% advance before confirmation.\",\n  \"uploaded_documents\": [\"https://example.com/docs/passport-john.pdf\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/app/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "app",
+                "leads"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Lead created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const json = pm.response.json();",
+                  "if (json.lead && json.lead.id) {",
+                  "  pm.collectionVariables.set('leadId', json.lead.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Leads",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tenantToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/app/leads?per_page=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "app",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "per_page",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Lead",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tenantToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/app/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "app",
+                "leads",
+                "{{leadId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Lead",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tenantToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"CUST-0001\",\n  \"lead_id\": \"LD-0001\",\n  \"full_name\": \"John A. Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phone_whatsapp\": \"+971555111222\",\n  \"country\": \"UAE\",\n  \"city\": \"Dubai\",\n  \"lead_source\": \"Website\",\n  \"travel_start_date\": \"2026-06-15\",\n  \"travel_end_date\": \"2026-06-22\",\n  \"number_of_days\": 8,\n  \"number_of_nights\": 7,\n  \"number_of_pax\": 4,\n  \"adults\": 2,\n  \"children\": 1,\n  \"infants\": 1,\n  \"preferred_destinations\": [\"Dubai\", \"Abu Dhabi\", \"Sharjah\"],\n  \"trip_type\": \"Family Leisure\",\n  \"residency_type\": \"Tourist\",\n  \"budget_range\": \"Premium\",\n  \"estimated_budget_amount\": 9200,\n  \"preferred_vehicle\": \"Luxury SUV\",\n  \"accommodation_type\": \"Resort\",\n  \"room_preference\": \"Suite\",\n  \"meal_plan\": \"Full Board\",\n  \"activities_interested_in\": [\"Desert Safari\", \"Yacht Cruise\", \"City Tour\"],\n  \"special_interests\": \"Photography and culture\",\n  \"dietary_requirement\": \"Halal vegetarian options\",\n  \"language_preference\": \"English\",\n  \"guide_preference\": \"Arabic-speaking\",\n  \"lead_status\": \"contacted\",\n  \"assigned_sales_person_id\": {{assignedSalesPersonId}},\n  \"priority\": \"high\",\n  \"follow_up_date\": \"2026-05-22\",\n  \"follow_up_time\": \"14:00\",\n  \"next_action\": \"Send revised quotation\",\n  \"quotation_status\": \"sent\",\n  \"probability_of_winning\": 75,\n  \"client_request_summary\": \"Luxury family trip with premium add-ons.\",\n  \"passport_visa_notes\": \"Visa docs under processing.\",\n  \"internal_sales_notes\": \"Strong potential, follow up in 2 days.\",\n  \"payment_special_conditions\": \"40% advance, balance before arrival.\",\n  \"uploaded_documents\": [\"https://example.com/docs/passport-john.pdf\", \"https://example.com/docs/visa-form.pdf\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/app/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "app",
+                "leads",
+                "{{leadId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Lead",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tenantToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/app/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "app",
+                "leads",
+                "{{leadId}}"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
