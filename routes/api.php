@@ -52,6 +52,7 @@ Route::prefix('app')->middleware(['auth:tenant', 'tenant.guard'])->group(functio
     Route::get('/me', [TenantAuthController::class, 'me']);
     Route::post('/logout', [TenantAuthController::class, 'logout']);
 
+    Route::get('/itineraries/dashboard', [TenantItineraryController::class, 'dashboard']);
     Route::get('/itineraries', [TenantItineraryController::class, 'index']);
     Route::post('/itineraries', [TenantItineraryController::class, 'store']);
     Route::get('/itineraries/{itinerary}', [TenantItineraryController::class, 'show']);

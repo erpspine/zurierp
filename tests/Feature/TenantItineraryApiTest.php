@@ -59,6 +59,64 @@ class TenantItineraryApiTest extends TestCase
             ->assertJsonCount(6, 'data'); // 1 from setUp + 5 from factory
     }
 
+    public function test_itinerary_dashboard_returns_summary_and_widgets()
+    {
+        Itinerary::factory()->create([
+            'company_id' => $this->company->id,
+            'lead_id' => $this->lead->id,
+            'created_by' => $this->user->id,
+            'name' => 'Confirmed Future Itinerary',
+            'start_date' => now()->addDays(10),
+            'end_date' => now()->addDays(14),
+        ]);
+
+        $ongoing = Itinerary::factory()->create([
+            'company_id' => $this->company->id,
+            'lead_id' => $this->lead->id,
+            'created_by' => $this->user->id,
+            'name' => 'Ongoing Itinerary',
+            'start_date' => now()->subDay(),
+            'end_date' => now()->addDays(2),
+        ]);
+
+        ItineraryDay::factory()->create([
+            'itinerary_id' => $ongoing->id,
+            'day_number' => 1,
+            'title' => 'Day 1',
+        ]);
+
+        Itinerary::factory()->create([
+            'company_id' => $this->company->id,
+            'lead_id' => $this->lead->id,
+            'created_by' => $this->user->id,
+            'name' => 'Completed Itinerary',
+            'start_date' => now()->subDays(10),
+            'end_date' => now()->subDays(3),
+        ]);
+
+        $response = $this->actingAs($this->user, 'tenant')
+            ->getJson('/api/app/itineraries/dashboard');
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'summary' => [
+                    'total_itineraries',
+                    'draft',
+                    'confirmed',
+                    'in_use',
+                    'completed',
+                ],
+                'itineraries_by_status',
+                'upcoming_itineraries',
+                'top_destinations',
+                'recent_activities',
+                'itineraries_by_month',
+                'generated_at',
+            ])
+            ->assertJsonPath('summary.total_itineraries', 4)
+            ->assertJsonPath('summary.completed', 1);
+    }
+
     public function test_create_itinerary()
     {
         $payload = [
