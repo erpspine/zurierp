@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\PlatformUserController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TenantAuthController;
 use App\Http\Controllers\Api\TenantLeadController;
+use App\Http\Controllers\Api\TenantItineraryController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('platform')->group(function (): void {
@@ -16,6 +17,7 @@ Route::prefix('platform')->group(function (): void {
 
 Route::prefix('tenant')->group(function (): void {
     Route::post('login', [TenantAuthController::class, 'login']);
+    Route::post('verify-login-otp', [TenantAuthController::class, 'verifyLoginOtp']);
 });
 
 Route::prefix('admin')->middleware('auth:platform')->group(function (): void {
@@ -49,6 +51,12 @@ Route::prefix('admin')->middleware('auth:platform')->group(function (): void {
 Route::prefix('app')->middleware(['auth:tenant', 'tenant.guard'])->group(function (): void {
     Route::get('/me', [TenantAuthController::class, 'me']);
     Route::post('/logout', [TenantAuthController::class, 'logout']);
+
+    Route::get('/itineraries', [TenantItineraryController::class, 'index']);
+    Route::post('/itineraries', [TenantItineraryController::class, 'store']);
+    Route::get('/itineraries/{itinerary}', [TenantItineraryController::class, 'show']);
+    Route::put('/itineraries/{itinerary}', [TenantItineraryController::class, 'update']);
+    Route::delete('/itineraries/{itinerary}', [TenantItineraryController::class, 'destroy']);
 
     Route::get('/leads/dashboard', [TenantLeadController::class, 'dashboard']);
     Route::get('/leads', [TenantLeadController::class, 'index']);
