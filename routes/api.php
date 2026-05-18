@@ -46,10 +46,11 @@ Route::prefix('admin')->middleware('auth:platform')->group(function (): void {
     Route::post('/subscriptions/{subscription}/cancel', [SubscriptionController::class, 'cancel']);
 });
 
-Route::prefix('app')->middleware('auth:tenant')->group(function (): void {
+Route::prefix('app')->middleware(['auth:tenant', 'tenant.guard'])->group(function (): void {
     Route::get('/me', [TenantAuthController::class, 'me']);
     Route::post('/logout', [TenantAuthController::class, 'logout']);
 
+    Route::get('/leads/dashboard', [TenantLeadController::class, 'dashboard']);
     Route::get('/leads', [TenantLeadController::class, 'index']);
     Route::post('/leads', [TenantLeadController::class, 'store']);
     Route::get('/leads/{lead}', [TenantLeadController::class, 'show']);

@@ -45,13 +45,16 @@ class TenantAuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json($request->user('tenant'));
+        /** @var CompanyUser $user */
+        $user = $request->user();
+
+        return response()->json($user);
     }
 
     public function logout(Request $request): JsonResponse
     {
         /** @var CompanyUser $user */
-        $user = $request->user('tenant');
+        $user = $request->user();
         $user->forceFill(['api_token' => null])->save();
 
         return response()->json(['message' => 'Logged out']);

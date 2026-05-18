@@ -9,13 +9,183 @@ use App\Models\Lead;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Str;
 
 class TenantLeadController extends Controller
 {
+    public function dashboard(Request $request): JsonResponse
+    {
+        $user = $this->currentTenantUser($request);
+
+        $baseQuery = Lead::query()->where('company_id', $user->company_id);
+        $totalLeads = (clone $baseQuery)->count();
+        $newLeadsToday = (clone $baseQuery)->whereDate('created_at', today())->count();
+        $quotationsSent = (clone $baseQuery)->where('quotation_status', 'sent')->count();
+        $wonLeads = (clone $baseQuery)->where('lead_status', 'won')->count();
+
+        $summary = [
+            'total_leads' => $totalLeads,
+            'new_leads_today' => $newLeadsToday,
+            'quotations_sent' => $quotationsSent,
+            'won_leads' => $wonLeads,
+            'conversion_rate' => $totalLeads > 0 ? round(($wonLeads / $totalLeads) * 100, 1) : 0.0,
+        ];
+
+        $pipelineDefinitions = [
+            ['key' => 'new', 'label' => 'New Leads', 'color' => '#0f5b46'],
+            ['key' => 'contacted', 'label' => 'Contacted', 'color' => '#17765f'],
+            ['key' => 'quoted', 'label' => 'Quoted', 'color' => '#2ecc71'],
+            ['key' => 'won', 'label' => 'Won', 'color' => '#f4c20d'],
+            ['key' => 'lost', 'label' => 'Lost', 'color' => '#e74c3c'],
+        ];
+
+        $salesPipeline = collect($pipelineDefinitions)
+            ->map(function (array $definition) use ($baseQuery, $totalLeads): array {
+                $count = (clone $baseQuery)->where('lead_status', $definition['key'])->count();
+
+                return [
+                    'key' => $definition['key'],
+                    'label' => $definition['label'],
+                    'value' => $count,
+                    'percentage' => $totalLeads > 0 ? round(($count / $totalLeads) * 100, 1) : 0.0,
+                    'color' => $definition['color'],
+                ];
+            })
+            ->values()
+            ->all();
+
+        $sourceCounts = (clone $baseQuery)
+            ->get(['lead_source'])
+            ->groupBy('lead_source')
+            ->map->count()
+            ->sortDesc()
+            ->take(5);
+
+        $leadSources = $sourceCounts
+            ->map(function (int $count, string $source) use ($totalLeads): array {
+                return [
+                    'label' => $source,
+                    'value' => $count,
+                    'percentage' => $totalLeads > 0 ? round(($count / $totalLeads) * 100, 1) : 0.0,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $destinationCounts = (clone $baseQuery)
+            ->get(['preferred_destinations'])
+            ->flatMap(function (Lead $lead): array {
+                return $lead->preferred_destinations ?? [];
+            })
+            ->filter()
+            ->groupBy(fn (string $destination): string => $destination)
+            ->map->count()
+            ->sortDesc()
+            ->take(5);
+
+        $leadDestinations = $destinationCounts
+            ->map(function (int $count, string $destination) use ($totalLeads): array {
+                return [
+                    'label' => $destination,
+                    'value' => $count,
+                    'percentage' => $totalLeads > 0 ? round(($count / $totalLeads) * 100, 1) : 0.0,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $trendMonths = collect(range(5, 0))
+            ->map(fn (int $offset) => now()->subMonthsNoOverflow($offset)->startOfMonth());
+
+        $trendLeadDates = (clone $baseQuery)
+            ->whereBetween('created_at', [$trendMonths->first(), now()->endOfMonth()])
+            ->get(['created_at']);
+
+        $trendGroups = $trendLeadDates->groupBy(function (Lead $lead): string {
+            return $lead->created_at?->format('Y-m') ?? '';
+        });
+
+        $leadTrend = $trendMonths
+            ->map(function ($month) use ($trendGroups): array {
+                $monthKey = $month->format('Y-m');
+
+                return [
+                    'label' => $month->format('M Y'),
+                    'value' => $trendGroups->get($monthKey, collect())->count(),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $followUpsDueToday = (clone $baseQuery)
+            ->with('assignedSalesPerson:id,name,email')
+            ->whereDate('follow_up_date', today())
+            ->orderBy('follow_up_time')
+            ->limit(5)
+            ->get()
+            ->map(function (Lead $lead): array {
+                return [
+                    'id' => $lead->id,
+                    'full_name' => $lead->full_name,
+                    'customer_id' => $lead->customer_id,
+                    'lead_status' => $lead->lead_status,
+                    'priority' => $lead->priority,
+                    'follow_up_date' => optional($lead->follow_up_date)->toDateString(),
+                    'follow_up_time' => optional($lead->follow_up_time)?->format('H:i'),
+                    'assigned_sales_person' => $lead->assignedSalesPerson ? [
+                        'id' => $lead->assignedSalesPerson->id,
+                        'name' => $lead->assignedSalesPerson->name,
+                        'email' => $lead->assignedSalesPerson->email,
+                    ] : null,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $recentActivities = AuditLog::query()
+            ->where('company_id', $user->company_id)
+            ->where('auditable_type', Lead::class)
+            ->whereIn('action', ['lead.created', 'lead.updated', 'lead.deleted'])
+            ->latest()
+            ->limit(5)
+            ->get()
+            ->map(function (AuditLog $log): array {
+                $eventData = $log->event_data ?? [];
+                $leadName = $eventData['full_name'] ?? 'Lead';
+
+                $message = match ($log->action) {
+                    'lead.created' => "Lead created for {$leadName}",
+                    'lead.updated' => "Lead updated for {$leadName}",
+                    'lead.deleted' => "Lead deleted for {$leadName}",
+                    default => Str::headline(str_replace('.', ' ', $log->action)),
+                };
+
+                return [
+                    'action' => $log->action,
+                    'title' => $message,
+                    'lead_id' => $eventData['lead_reference'] ?? null,
+                    'full_name' => $leadName,
+                    'created_at' => $log->created_at?->toIso8601String(),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return response()->json([
+            'summary' => $summary,
+            'sales_pipeline' => $salesPipeline,
+            'leads_by_source' => $leadSources,
+            'follow_ups_due_today' => $followUpsDueToday,
+            'recent_activities' => $recentActivities,
+            'leads_by_destination' => $leadDestinations,
+            'leads_trend' => $leadTrend,
+            'generated_at' => now()->toIso8601String(),
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
-        /** @var CompanyUser $user */
-        $user = $request->user('tenant');
+        $user = $this->currentTenantUser($request);
 
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:200'],
@@ -67,8 +237,7 @@ class TenantLeadController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        /** @var CompanyUser $user */
-        $user = $request->user('tenant');
+        $user = $this->currentTenantUser($request);
 
         $data = $this->validatePayload($request, $user->company_id);
         $data['company_id'] = $user->company_id;
@@ -80,6 +249,7 @@ class TenantLeadController extends Controller
         AuditLog::query()->create([
             'actor_guard' => 'tenant',
             'actor_id' => $user->id,
+            'company_id' => $user->company_id,
             'action' => 'lead.created',
             'auditable_type' => Lead::class,
             'auditable_id' => $lead->id,
@@ -108,8 +278,7 @@ class TenantLeadController extends Controller
 
     public function update(Request $request, string $lead): JsonResponse
     {
-        /** @var CompanyUser $user */
-        $user = $request->user('tenant');
+        $user = $this->currentTenantUser($request);
 
         $row = $this->findLeadForTenant($request, $lead);
 
@@ -126,6 +295,7 @@ class TenantLeadController extends Controller
         AuditLog::query()->create([
             'actor_guard' => 'tenant',
             'actor_id' => $user->id,
+            'company_id' => $user->company_id,
             'action' => 'lead.updated',
             'auditable_type' => Lead::class,
             'auditable_id' => $row->id,
@@ -147,14 +317,14 @@ class TenantLeadController extends Controller
 
     public function destroy(Request $request, string $lead): JsonResponse
     {
-        /** @var CompanyUser $user */
-        $user = $request->user('tenant');
+        $user = $this->currentTenantUser($request);
 
         $row = $this->findLeadForTenant($request, $lead);
 
         AuditLog::query()->create([
             'actor_guard' => 'tenant',
             'actor_id' => $user->id,
+            'company_id' => $user->company_id,
             'action' => 'lead.deleted',
             'auditable_type' => Lead::class,
             'auditable_id' => $row->id,
@@ -178,13 +348,20 @@ class TenantLeadController extends Controller
 
     private function findLeadForTenant(Request $request, string $leadId): Lead
     {
-        /** @var CompanyUser $user */
-        $user = $request->user('tenant');
+        $user = $this->currentTenantUser($request);
 
         return Lead::query()
             ->where('company_id', $user->company_id)
             ->where('id', $leadId)
             ->firstOrFail();
+    }
+
+    private function currentTenantUser(Request $request): CompanyUser
+    {
+        /** @var CompanyUser $user */
+        $user = $request->user();
+
+        return $user;
     }
 
     private function validatePayload(Request $request, string $companyId, ?string $leadId = null): array

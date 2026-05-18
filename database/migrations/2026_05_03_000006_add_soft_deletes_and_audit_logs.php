@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -22,6 +23,7 @@ return new class extends Migration
                 $table->id();
                 $table->string('actor_guard')->nullable();
                 $table->unsignedBigInteger('actor_id')->nullable();
+                $table->uuid('company_id')->nullable()->index();
                 $table->string('action');
                 $table->string('auditable_type')->nullable();
                 $table->string('auditable_id')->nullable();
@@ -33,7 +35,39 @@ return new class extends Migration
                 $table->index(['action', 'created_at']);
                 $table->index(['auditable_type', 'auditable_id']);
                 $table->index(['actor_guard', 'actor_id']);
+                $table->index(['company_id', 'created_at']);
             });
+
+            return;
+        }
+
+        if (! Schema::hasColumn('audit_logs', 'company_id')) {
+            Schema::table('audit_logs', function (Blueprint $table): void {
+                $table->uuid('company_id')->nullable()->after('actor_id');
+                $table->index(['company_id', 'created_at']);
+            });
+        }
+
+        if (Schema::hasTable('leads')) {
+            $leadCompanyIds = DB::table('leads')
+                ->whereNotNull('id')
+                ->pluck('company_id', 'id');
+
+            DB::table('audit_logs')
+                ->whereNull('company_id')
+                ->where('auditable_type', \App\Models\Lead::class)
+                ->orderBy('id')
+                ->chunkById(500, function ($logs) use ($leadCompanyIds): void {
+                    foreach ($logs as $log) {
+                        $companyId = $leadCompanyIds[$log->auditable_id] ?? null;
+
+                        if ($companyId) {
+                            DB::table('audit_logs')
+                                ->where('id', $log->id)
+                                ->update(['company_id' => $companyId]);
+                        }
+                    }
+                });
         }
     }
 
