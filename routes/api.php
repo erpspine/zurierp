@@ -38,6 +38,8 @@ Route::prefix('admin')->middleware('auth:platform')->group(function (): void {
     Route::post('/companies', [CompanyController::class, 'store']);
     Route::get('/companies/{company}', [CompanyController::class, 'show']);
     Route::post('/companies/{company}', [CompanyController::class, 'update']);
+    Route::post('/companies/{company}/users/{companyUser}/status', [CompanyController::class, 'updateCompanyUserStatus']);
+    Route::post('/companies/{company}/users/{companyUser}/reset-password', [CompanyController::class, 'resetCompanyUserPassword']);
     Route::delete('/companies/{company}', [CompanyController::class, 'destroy']);
 
     // Subscriptions
@@ -48,7 +50,7 @@ Route::prefix('admin')->middleware('auth:platform')->group(function (): void {
     Route::post('/subscriptions/{subscription}/cancel', [SubscriptionController::class, 'cancel']);
 });
 
-Route::prefix('app')->middleware(['auth:tenant', 'tenant.guard'])->group(function (): void {
+Route::prefix('app')->middleware(['auth:tenant', 'tenant.guard', 'tenant.subscription'])->group(function (): void {
     Route::get('/me', [TenantAuthController::class, 'me']);
     Route::post('/logout', [TenantAuthController::class, 'logout']);
 

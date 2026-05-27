@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Mail\CompanySubscriptionActivatedMail;
+use App\Mail\CompanySubscriptionStatusMail;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Company;
@@ -10,6 +12,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 class SubscriptionController extends Controller
@@ -102,9 +105,13 @@ class SubscriptionController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
+        $subscription->load(['company:id,name,company_code,email', 'plan:id,name,slug']);
+
+        $this->sendSubscriptionActivatedEmail($subscription);
+
         return response()->json([
             'message'      => 'Subscription activated successfully.',
-            'subscription' => $subscription->load(['company:id,name,company_code', 'plan:id,name,slug']),
+            'subscription' => $subscription,
             'invoice_download_url' => url("/api/admin/subscriptions/{$subscription->id}/invoice"),
         ], 201);
     }
@@ -149,6 +156,10 @@ class SubscriptionController extends Controller
             'ip_address'     => $request->ip(),
             'user_agent'     => $request->userAgent(),
         ]);
+
+        $subscription->load(['company:id,name,company_code,email', 'plan:id,name,slug']);
+
+        $this->sendSubscriptionStatusEmail($subscription, 'cancelled');
 
         return response()->json([
             'message'      => 'Subscription cancelled.',
@@ -225,5 +236,75 @@ class SubscriptionController extends Controller
         } while (Subscription::query()->where('invoice_number', $candidate)->exists());
 
         return $candidate;
+    }
+
+    private function sendSubscriptionActivatedEmail(Subscription $subscription): void
+    {
+        $company = $subscription->company;
+
+        if (! $company) {
+            return;
+        }
+
+        $recipients = collect([
+            $company->email,
+            ...$company->users()->pluck('email')->all(),
+        ])
+            ->filter()
+            ->map(fn ($email) => trim((string) $email))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($recipients->isEmpty()) {
+            return;
+        }
+
+        foreach ($recipients as $recipient) {
+            try {
+                Mail::to($recipient)->send(new CompanySubscriptionActivatedMail(
+                    subscription: $subscription,
+                    loginUrl: rtrim((string) config('app.url'), '/'),
+                ));
+            } catch (\Throwable $mailException) {
+                report($mailException);
+            }
+        }
+    }
+
+    private function sendSubscriptionStatusEmail(Subscription $subscription, string $statusType, ?int $daysRemaining = null): void
+    {
+        $company = $subscription->company;
+
+        if (! $company) {
+            return;
+        }
+
+        $recipients = collect([
+            $company->email,
+            ...$company->users()->pluck('email')->all(),
+        ])
+            ->filter()
+            ->map(fn ($email) => trim((string) $email))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($recipients->isEmpty()) {
+            return;
+        }
+
+        foreach ($recipients as $recipient) {
+            try {
+                Mail::to($recipient)->send(new CompanySubscriptionStatusMail(
+                    subscription: $subscription,
+                    statusType: $statusType,
+                    loginUrl: rtrim((string) config('app.url'), '/'),
+                    daysRemaining: $daysRemaining,
+                ));
+            } catch (\Throwable $mailException) {
+                report($mailException);
+            }
+        }
     }
 }

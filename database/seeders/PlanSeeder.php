@@ -14,6 +14,28 @@ class PlanSeeder extends Seeder
     {
         $plans = [
             [
+                'name' => 'Trial',
+                'slug' => 'trial',
+                'subtitle' => 'Free access for the first 30 days',
+                'monthly_price' => 0,
+                'is_custom_pricing' => false,
+                'users_limit' => 2,
+                'branches_limit' => 1,
+                'vehicles_limit' => 2,
+                'bookings_limit' => 15,
+                'features' => [
+                    '30 days free access',
+                    'CRM / Leads',
+                    'Itinerary Builder',
+                    'Quotations',
+                    'Basic Bookings',
+                    'Email support',
+                ],
+                'is_featured' => true,
+                'is_active' => true,
+                'sort_order' => 1,
+            ],
+            [
                 'name' => 'Starter',
                 'slug' => 'starter',
                 'subtitle' => 'For small tour operators',
@@ -33,7 +55,7 @@ class PlanSeeder extends Seeder
                 ],
                 'is_featured' => false,
                 'is_active' => true,
-                'sort_order' => 1,
+                'sort_order' => 2,
             ],
             [
                 'name' => 'Professional',
@@ -56,7 +78,7 @@ class PlanSeeder extends Seeder
                 ],
                 'is_featured' => true,
                 'is_active' => true,
-                'sort_order' => 2,
+                'sort_order' => 3,
             ],
             [
                 'name' => 'Business',
@@ -81,7 +103,7 @@ class PlanSeeder extends Seeder
                 ],
                 'is_featured' => false,
                 'is_active' => true,
-                'sort_order' => 3,
+                'sort_order' => 4,
             ],
             [
                 'name' => 'Enterprise',
@@ -104,7 +126,7 @@ class PlanSeeder extends Seeder
                 ],
                 'is_featured' => false,
                 'is_active' => true,
-                'sort_order' => 4,
+                'sort_order' => 5,
             ],
         ];
 

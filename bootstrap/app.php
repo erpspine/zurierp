@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use App\Http\Middleware\EnsureTenantSubscriptionIsActive;
 use App\Http\Middleware\SetTenantGuard;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -15,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'tenant.guard' => SetTenantGuard::class,
+            'tenant.subscription' => EnsureTenantSubscriptionIsActive::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

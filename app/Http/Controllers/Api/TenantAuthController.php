@@ -18,20 +18,98 @@ class TenantAuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $credentials = $request->validate([
-            'company_id' => ['required', 'uuid'],
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
+            'company_id' => ['nullable', 'uuid'],
+            'company_code' => ['nullable', 'string', 'max:30'],
         ]);
 
-        $user = CompanyUser::query()
-            ->where('company_id', $credentials['company_id'])
+        $users = CompanyUser::query()
+            ->with('company:id,name,company_code')
             ->where('email', $credentials['email'])
-            ->first();
+            ->get();
 
-        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+        $matchingUsers = $users
+            ->filter(fn (CompanyUser $user) => Hash::check($credentials['password'], $user->password))
+            ->values();
+
+        if (! empty($credentials['company_id'])) {
+            $matchingUsers = $matchingUsers
+                ->where('company_id', $credentials['company_id'])
+                ->values();
+        }
+
+        if (! empty($credentials['company_code'])) {
+            $requestedCode = Str::lower(trim((string) $credentials['company_code']));
+
+            $matchingUsers = $matchingUsers
+                ->filter(function (CompanyUser $user) use ($requestedCode): bool {
+                    $companyCode = Str::lower(trim((string) $user->company?->company_code));
+
+                    return $companyCode !== '' && $companyCode === $requestedCode;
+                })
+                ->values();
+        }
+
+        if ($matchingUsers->isEmpty()) {
             return response()->json([
                 'message' => 'Invalid credentials.',
             ], 401);
+        }
+
+        $activeMatches = $matchingUsers
+            ->filter(fn (CompanyUser $user) => Str::lower((string) $user->status) === 'active')
+            ->values();
+
+        if ($activeMatches->isEmpty()) {
+            return response()->json([
+                'message' => 'Your account is inactive. Please contact your company administrator.',
+            ], 403);
+        }
+
+        $matchingUsers = $activeMatches;
+
+        $companies = $matchingUsers
+            ->map(fn (CompanyUser $user) => $user->company)
+            ->filter()
+            ->unique('id')
+            ->values();
+
+        $companySelectorProvided = ! empty($credentials['company_id']) || ! empty($credentials['company_code']);
+
+        if ($companies->count() > 1 && ! $companySelectorProvided) {
+            return response()->json([
+                'message' => 'Multiple companies matched this account. Please choose one company to continue.',
+                'requires_company_selection' => true,
+                'companies' => $companies->map(fn ($company) => [
+                    'id' => $company->id,
+                    'name' => $company->name,
+                    'company_code' => $company->company_code,
+                ])->values(),
+            ], 409);
+        }
+
+        $selectedCompany = $companies->first();
+        $user = $matchingUsers->firstWhere('company_id', $selectedCompany?->id) ?? $matchingUsers->first();
+
+        if (! $user) {
+            return response()->json([
+                'message' => 'Invalid credentials.',
+            ], 401);
+        }
+
+        if (Str::lower((string) $user->status) !== 'active') {
+            return response()->json([
+                'message' => 'Your account is inactive. Please contact your company administrator.',
+            ], 403);
+        }
+
+        $company = $user->company;
+
+        if (! $company || ! $company->hasValidSubscription()) {
+            return response()->json([
+                'message' => 'Your company subscription is inactive or expired. Please contact support or renew the subscription.',
+            ], 403);
         }
 
         $device = $this->resolveDevice($request);
@@ -126,6 +204,20 @@ class TenantAuthController extends Controller
             return response()->json([
                 'message' => 'User not found for this OTP challenge.',
             ], 404);
+        }
+
+        if (Str::lower((string) $user->status) !== 'active') {
+            return response()->json([
+                'message' => 'Your account is inactive. Please contact your company administrator.',
+            ], 403);
+        }
+
+        $company = $user->company;
+
+        if (! $company || ! $company->hasValidSubscription()) {
+            return response()->json([
+                'message' => 'Your company subscription is inactive or expired. Please contact support or renew the subscription.',
+            ], 403);
         }
 
         $challenge->consumed_at = now();

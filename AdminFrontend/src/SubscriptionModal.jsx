@@ -20,6 +20,27 @@ const PAYMENT_METHODS = [
 
 const CURRENCIES = ['USD', 'TZS', 'EUR', 'GBP', 'KES', 'UGX', 'RWF', 'ZAR']
 
+function formatDisplayDate(value) {
+  if (!value) return '—'
+
+  const stringValue = String(value).trim()
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stringValue)) {
+    const [year, month, day] = stringValue.split('-')
+    return `${day}/${month}/${year}`
+  }
+
+  const date = new Date(stringValue)
+
+  return Number.isNaN(date.getTime())
+    ? stringValue
+    : new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).format(date)
+}
+
 function addMonths(dateStr, months) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
@@ -107,7 +128,7 @@ export default function SubscriptionModal({ apiBaseUrl, apiToken, companies, pla
           <div style="text-align:left;line-height:1.65">
             <div><strong>Company:</strong> ${result.subscription?.company?.name || selectedCompany?.name || 'Selected company'}</div>
             <div><strong>License:</strong> <code>${result.subscription?.license_key || 'Generated'}</code></div>
-            <div><strong>Valid Until:</strong> ${result.subscription?.ends_at ? String(result.subscription.ends_at).slice(0, 10) : endsAt || '—'}</div>
+            <div><strong>Valid Until:</strong> ${formatDisplayDate(result.subscription?.ends_at || endsAt)}</div>
           </div>
         `,
         confirmButtonText: 'Great',
@@ -207,12 +228,12 @@ export default function SubscriptionModal({ apiBaseUrl, apiToken, companies, pla
               <div className="sm-period-display">
                 <div className="sm-period-row">
                   <span>Start</span>
-                  <strong>{form.starts_at || '—'}</strong>
+                  <strong>{formatDisplayDate(form.starts_at)}</strong>
                 </div>
                 <div className="sm-period-arrow">→</div>
                 <div className="sm-period-row">
                   <span>Expiry</span>
-                  <strong className="sm-expiry">{endsAt || '—'}</strong>
+                  <strong className="sm-expiry">{formatDisplayDate(endsAt)}</strong>
                 </div>
                 <div className="sm-period-duration">
                   {durationMonths} month{durationMonths > 1 ? 's' : ''}

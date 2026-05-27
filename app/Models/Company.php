@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 class Company extends Model
 {
@@ -104,5 +105,21 @@ class Company extends Model
     public function roles(): HasMany
     {
         return $this->hasMany(Role::class);
+    }
+
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class);
+    }
+
+    public function hasValidSubscription(): bool
+    {
+        $today = Carbon::today();
+
+        return $this->subscriptions()
+            ->whereIn('status', ['active', 'trial'])
+            ->whereDate('starts_at', '<=', $today)
+            ->whereDate('ends_at', '>=', $today)
+            ->exists();
     }
 }

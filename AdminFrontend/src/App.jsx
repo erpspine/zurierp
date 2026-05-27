@@ -9,6 +9,52 @@ import SubscriptionModal from './SubscriptionModal'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8099/api'
 
+const dateFormatter = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+})
+
+const dateTimeFormatter = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+function formatDisplayDate(value) {
+  if (!value) {
+    return '—'
+  }
+
+  const stringValue = String(value).trim()
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stringValue)) {
+    const [year, month, day] = stringValue.split('-')
+    return `${day}/${month}/${year}`
+  }
+
+  const date = new Date(stringValue)
+  return Number.isNaN(date.getTime()) ? stringValue : dateFormatter.format(date)
+}
+
+function formatDisplayDateTime(value) {
+  if (!value) {
+    return '—'
+  }
+
+  const stringValue = String(value).trim()
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stringValue)) {
+    return formatDisplayDate(stringValue)
+  }
+
+  const date = new Date(stringValue)
+  return Number.isNaN(date.getTime()) ? stringValue : dateTimeFormatter.format(date)
+}
+
 function App() {
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(false)
   const [activePage, setActivePage] = useState('dashboard')
@@ -51,6 +97,7 @@ function App() {
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false)
   const [showCompanyWizard, setShowCompanyWizard] = useState(false)
   const [viewingCompany, setViewingCompany] = useState(null)
+  const [companyUsersFilter, setCompanyUsersFilter] = useState('all')
   const [editingCompany, setEditingCompany] = useState(null)
   const [companiesFilter, setCompaniesFilter] = useState({ search: '', status: 'all', subscription: 'all' })
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false)
@@ -150,6 +197,22 @@ function App() {
       return matchesSearch && matchesStatus && matchesSub
     })
   }, [companies, companiesFilter])
+
+  const filteredViewingCompanyUsers = useMemo(() => {
+    if (!viewingCompany || !Array.isArray(viewingCompany.users)) {
+      return []
+    }
+
+    if (companyUsersFilter === 'inactive') {
+      return viewingCompany.users.filter((user) => String(user.status || 'active').toLowerCase() === 'inactive')
+    }
+
+    if (companyUsersFilter === 'active') {
+      return viewingCompany.users.filter((user) => String(user.status || 'active').toLowerCase() === 'active')
+    }
+
+    return viewingCompany.users
+  }, [viewingCompany, companyUsersFilter])
 
   useEffect(() => {
     if (!apiToken) {
@@ -366,8 +429,7 @@ function App() {
       return '-'
     }
 
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+    return formatDisplayDateTime(value)
   }
 
   function formatAuditDetails(eventData) {
@@ -780,7 +842,8 @@ function App() {
       const url = window.URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `invoice-${sub.invoice_number || sub.license_key || sub.id}.pdf`
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      anchor.download = `invoice-${sub.invoice_number || sub.license_key || sub.id}-${stamp}.pdf`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -793,8 +856,10 @@ function App() {
   async function openViewCompany(company) {
     try {
       const full = await apiRequest(`/admin/companies/${company.id}`)
+      setCompanyUsersFilter('all')
       setViewingCompany(full)
     } catch (_error) {
+      setCompanyUsersFilter('all')
       setViewingCompany(company)
     }
   }
@@ -841,6 +906,137 @@ function App() {
         confirmButtonColor: '#1a6645',
       })
     }
+  }
+
+  async function onResetCompanyUserPassword(user) {
+    if (!viewingCompany?.id || !user?.id) {
+      return
+    }
+
+    const result = await Swal.fire({
+      title: 'Reset user password?',
+      html: `A new password will be generated for <strong>${user.name || user.email || 'this user'}</strong> and sent to <strong>${user.email || 'their email'}</strong>.<br><br>Type <strong>RESET</strong> to confirm.`,
+      icon: 'warning',
+      showCancelButton: true,
+      input: 'text',
+      inputPlaceholder: 'Type RESET',
+      confirmButtonText: 'Yes, reset password',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#1a6645',
+      reverseButtons: true,
+      focusCancel: true,
+      preConfirm: (value) => {
+        if (String(value || '').trim().toUpperCase() !== 'RESET') {
+          Swal.showValidationMessage('Please type RESET to continue.')
+          return false
+        }
+
+        return true
+      },
+    })
+
+    if (!result.isConfirmed) return
+
+    try {
+      const response = await apiRequest(`/admin/companies/${viewingCompany.id}/users/${user.id}/reset-password`, {
+        method: 'POST',
+      })
+
+      await Swal.fire({
+        icon: 'success',
+        title: 'Password reset',
+        text: response?.message || 'A new password has been emailed to the user.',
+        confirmButtonColor: '#1a6645',
+      })
+    } catch (error) {
+      await Swal.fire({
+        icon: 'error',
+        title: 'Could not reset password',
+        text: error instanceof Error ? error.message : 'Please try again.',
+        confirmButtonColor: '#1a6645',
+      })
+    }
+  }
+
+  async function onToggleCompanyUserStatus(user) {
+    if (!viewingCompany?.id || !user?.id) {
+      return
+    }
+
+    const currentStatus = String(user.status || 'active').toLowerCase()
+    const nextStatus = currentStatus === 'active' ? 'inactive' : 'active'
+    const actionLabel = nextStatus === 'inactive' ? 'Deactivate' : 'Activate'
+
+    const result = await Swal.fire({
+      title: `${actionLabel} user?`,
+      html: nextStatus === 'inactive'
+        ? `User <strong>${user.name || user.email || 'this account'}</strong> will no longer be able to log in.`
+        : `User <strong>${user.name || user.email || 'this account'}</strong> will be allowed to log in again.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: `Yes, ${actionLabel.toLowerCase()}`,
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#1a6645',
+      reverseButtons: true,
+      focusCancel: true,
+    })
+
+    if (!result.isConfirmed) return
+
+    try {
+      const response = await apiRequest(`/admin/companies/${viewingCompany.id}/users/${user.id}/status`, {
+        method: 'POST',
+        body: JSON.stringify({ status: nextStatus }),
+      })
+
+      setViewingCompany((prev) => {
+        if (!prev) return prev
+
+        return {
+          ...prev,
+          users: Array.isArray(prev.users)
+            ? prev.users.map((item) => (item.id === user.id ? { ...item, ...(response?.user || {}), status: nextStatus } : item))
+            : prev.users,
+        }
+      })
+
+      await Swal.fire({
+        icon: 'success',
+        title: nextStatus === 'inactive' ? 'User deactivated' : 'User activated',
+        text: response?.message || (nextStatus === 'inactive' ? 'User login has been disabled.' : 'User login has been enabled.'),
+        confirmButtonColor: '#1a6645',
+      })
+    } catch (error) {
+      await Swal.fire({
+        icon: 'error',
+        title: `Could not ${actionLabel.toLowerCase()} user`,
+        text: error instanceof Error ? error.message : 'Please try again.',
+        confirmButtonColor: '#1a6645',
+      })
+    }
+  }
+
+  function renderNoDataShowcase({ icon, title, description, examples, actionLabel, onAction }) {
+    return (
+      <div className="empty-state empty-state-rich">
+        <div className="empty-state-icon">{icon}</div>
+        <h3>{title}</h3>
+        <p>{description}</p>
+        <div className="empty-example-list" role="list">
+          {examples.map((example) => (
+            <div className="empty-example-item" role="listitem" key={example.label}>
+              <span className="empty-example-label">{example.label}</span>
+              <strong>{example.value}</strong>
+            </div>
+          ))}
+        </div>
+        {actionLabel && onAction ? (
+          <button type="button" className="primary-btn" onClick={onAction}>
+            {actionLabel}
+          </button>
+        ) : null}
+      </div>
+    )
   }
 
   function renderSubscriptionsPage() {
@@ -929,7 +1125,18 @@ function App() {
           {isLoadingSubscriptions ? (
             <p className="loading-text">Loading subscriptions…</p>
           ) : subscriptions.length === 0 ? (
-            <p className="empty-text">No subscriptions found.</p>
+            renderNoDataShowcase({
+              icon: '🧾',
+              title: 'No subscriptions yet',
+              description: 'Create your first subscription to start tracking plan activations and billing cycles.',
+              examples: [
+                { label: 'Company', value: 'Savanna Quest Ltd' },
+                { label: 'Plan', value: 'Growth Plan (Monthly)' },
+                { label: 'Status', value: 'Trial -> Active' },
+              ],
+              actionLabel: '+ New Subscription',
+              onAction: () => setShowSubscriptionModal(true),
+            })
           ) : (
             <div className="table-scroll-wrap">
               <table className="data-table">
@@ -973,9 +1180,9 @@ function App() {
                             {st.label}
                           </span>
                         </td>
-                        <td>{sub.starts_at ? String(sub.starts_at).slice(0, 10) : '—'}</td>
+                        <td>{formatDisplayDate(sub.starts_at)}</td>
                         <td>
-                          <div>{sub.ends_at ? String(sub.ends_at).slice(0, 10) : '—'}</div>
+                          <div>{formatDisplayDate(sub.ends_at)}</div>
                           <div style={{ fontSize: '0.75rem', color: getExpiryMeta(sub.ends_at).color, marginTop: '2px', fontWeight: 600 }}>
                             {getExpiryMeta(sub.ends_at).text}
                           </div>
@@ -1088,11 +1295,18 @@ function App() {
               <h3>Loading companies…</h3>
             </div>
           ) : !companies.length ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">🏢</div>
-              <h3>No companies yet</h3>
-              <p>Get started by creating your first company with the <strong>+ New Company</strong> button above.</p>
-            </div>
+            renderNoDataShowcase({
+              icon: '🏢',
+              title: 'No companies yet',
+              description: 'Add your first tenant company to onboard users, subscriptions, and billing data.',
+              examples: [
+                { label: 'Company Code', value: 'ZURI-001' },
+                { label: 'Industry', value: 'Travel & Tours' },
+                { label: 'Subscription', value: 'Trial' },
+              ],
+              actionLabel: '+ New Company',
+              onAction: () => setShowCompanyWizard(true),
+            })
           ) : !filteredCompanies.length ? (
             <div className="empty-state">
               <div className="empty-state-icon">🔍</div>
@@ -1142,7 +1356,7 @@ function App() {
                     </td>
                     <td>{[company.city, company.country].filter(Boolean).join(', ') || '—'}</td>
                     <td>{company.email || '—'}</td>
-                    <td>{company.created_at ? new Date(company.created_at).toLocaleDateString() : '—'}</td>
+                    <td>{formatDisplayDate(company.created_at)}</td>
                     <td>
                       <div className="row-actions">
                         <button type="button" className="row-action-btn view" title="View" onClick={() => openViewCompany(company)}>👁</button>
@@ -1327,7 +1541,7 @@ function App() {
                         {company.subscription_status || 'trial'}
                       </span>
                     </td>
-                    <td>{company.created_at ? new Date(company.created_at).toLocaleDateString() : '—'}</td>
+                    <td>{formatDisplayDate(company.created_at)}</td>
                   </tr>
                 )})}
                 {!recentCompanies.length ? (
@@ -1548,7 +1762,20 @@ function App() {
                 </article>
               )
             })}
-            {!isLoadingPlans && !plans.length ? <p>No plans found. Create your first one.</p> : null}
+            {!isLoadingPlans && !plans.length ? (
+              renderNoDataShowcase({
+                icon: '📦',
+                title: 'No plans configured',
+                description: 'Define your pricing catalog so new companies can subscribe to the right package.',
+                examples: [
+                  { label: 'Starter', value: 'USD 29 / month' },
+                  { label: 'Growth', value: 'USD 99 / month' },
+                  { label: 'Enterprise', value: 'Custom pricing' },
+                ],
+                actionLabel: 'Create first plan',
+                onAction: resetPlanForm,
+              })
+            ) : null}
           </div>
         </div>
       </section>
@@ -1679,46 +1906,61 @@ function App() {
               </label>
             </div>
 
-            <div className="table-wrap users-table-wrap">
-              <table className="users-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Status</th>
-                    <th>Roles</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map((user) => (
-                    <tr key={user.id}>
-                      <td>{user.name}</td>
-                      <td>{user.email}</td>
-                      <td>
-                        <span className={`badge ${(user.status || 'active').toLowerCase()}`}>
-                          {user.status || 'active'}
-                        </span>
-                      </td>
-                      <td>{(user.roles || []).map((role) => role.name).join(', ') || '-'}</td>
-                      <td>
-                        <button type="button" className="ghost-btn" onClick={() => onSelectUserForEdit(user)}>
-                          Edit
-                        </button>
-                        <button type="button" className="ghost-btn delete-btn" onClick={() => onDeleteUser(user)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!filteredUsers.length ? (
+            {!isLoadingUsers && !users.length ? (
+              renderNoDataShowcase({
+                icon: '👤',
+                title: 'No platform users yet',
+                description: 'Create your admin team to manage companies, plans, and subscriptions.',
+                examples: [
+                  { label: 'Name', value: 'Operations Admin' },
+                  { label: 'Email', value: 'ops@zuritours.com' },
+                  { label: 'Role', value: 'Super Admin' },
+                ],
+                actionLabel: 'Create first user',
+                onAction: resetForm,
+              })
+            ) : (
+              <div className="table-wrap users-table-wrap">
+                <table className="users-table">
+                  <thead>
                     <tr>
-                      <td colSpan="5">No users match your filters.</td>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th>Roles</th>
+                      <th>Action</th>
                     </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredUsers.map((user) => (
+                      <tr key={user.id}>
+                        <td>{user.name}</td>
+                        <td>{user.email}</td>
+                        <td>
+                          <span className={`badge ${(user.status || 'active').toLowerCase()}`}>
+                            {user.status || 'active'}
+                          </span>
+                        </td>
+                        <td>{(user.roles || []).map((role) => role.name).join(', ') || '-'}</td>
+                        <td>
+                          <button type="button" className="ghost-btn" onClick={() => onSelectUserForEdit(user)}>
+                            Edit
+                          </button>
+                          <button type="button" className="ghost-btn delete-btn" onClick={() => onDeleteUser(user)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!filteredUsers.length ? (
+                      <tr>
+                        <td colSpan="5">No users match your filters.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </article>
         </div>
       </section>
@@ -1929,9 +2171,9 @@ function App() {
   }
 
   return (
-    <div style={{ display: 'flex' }}>
+    <div className="app-shell">
       <SidebarMui activePage={activePage} setActivePage={setActivePage} />
-      <main style={{ flexGrow: 1 }}>
+      <main className="main app-main">
         <header className="topbar reveal-2">
           <div>
             <h1>
@@ -2041,7 +2283,10 @@ function App() {
                 <h2>{viewingCompany.name}</h2>
                 <p>{viewingCompany.company_code} · {viewingCompany.industry || 'Company'} · {[viewingCompany.city, viewingCompany.country].filter(Boolean).join(', ') || '—'}</p>
               </div>
-              <button type="button" className="cem-close" onClick={() => setViewingCompany(null)}>✕</button>
+              <button type="button" className="cem-close" onClick={() => {
+                setCompanyUsersFilter('all')
+                setViewingCompany(null)
+              }}>✕</button>
             </div>
             <div className="cem-body">
               {/* Basic Info — 2-col grid */}
@@ -2058,11 +2303,11 @@ function App() {
                       ['VAT Number', viewingCompany.vat_number],
                       ['Industry', viewingCompany.industry],
                       ['Business Type', viewingCompany.business_type],
-                      ['Incorporation Date', viewingCompany.incorporation_date ? String(viewingCompany.incorporation_date).slice(0, 10) : null],
+                      ['Incorporation Date', viewingCompany.incorporation_date ? formatDisplayDate(viewingCompany.incorporation_date) : null],
                       ['Status', viewingCompany.status],
                       ['Subscription', viewingCompany.subscription_status],
-                      ['Created', viewingCompany.created_at ? new Date(viewingCompany.created_at).toLocaleString() : null],
-                      ['Last Updated', viewingCompany.updated_at ? new Date(viewingCompany.updated_at).toLocaleString() : null],
+                      ['Created', viewingCompany.created_at ? formatDisplayDateTime(viewingCompany.created_at) : null],
+                      ['Last Updated', viewingCompany.updated_at ? formatDisplayDateTime(viewingCompany.updated_at) : null],
                     ].map(([label, value]) => (
                       <div key={label} className="cem-view-row">
                         <span className="cem-view-label">{label}</span>
@@ -2117,8 +2362,95 @@ function App() {
                 </div>
               </div>
 
+              <div className="cem-section">
+                <div className="cem-section-title"><span className="cem-section-icon">👥</span>Registered Users</div>
+                <div className="cem-section-body">
+                  {Array.isArray(viewingCompany.users) && viewingCompany.users.length ? (
+                    <>
+                      <div className="cem-user-filter-row">
+                        <button
+                          type="button"
+                          className={`cem-user-filter-btn ${companyUsersFilter === 'all' ? 'active' : ''}`}
+                          onClick={() => setCompanyUsersFilter('all')}
+                        >
+                          All ({viewingCompany.users.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`cem-user-filter-btn ${companyUsersFilter === 'inactive' ? 'active' : ''}`}
+                          onClick={() => setCompanyUsersFilter('inactive')}
+                        >
+                          Inactive ({viewingCompany.users.filter((user) => String(user.status || 'active').toLowerCase() === 'inactive').length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`cem-user-filter-btn ${companyUsersFilter === 'active' ? 'active' : ''}`}
+                          onClick={() => setCompanyUsersFilter('active')}
+                        >
+                          Active ({viewingCompany.users.filter((user) => String(user.status || 'active').toLowerCase() === 'active').length})
+                        </button>
+                      </div>
+
+                    <div className="cem-users-list">
+                      {filteredViewingCompanyUsers.map((user) => (
+                        <div key={user.id} className="cem-user-card">
+                          <div className="cem-user-main">
+                            <strong>{user.name || 'Unnamed user'}</strong>
+                            <span>{user.email || 'No email'}</span>
+                          </div>
+                          <div className="cem-user-meta">
+                            <span className={`badge ${String(user.status || 'active').toLowerCase()}`}>
+                              {user.status || 'active'}
+                            </span>
+                            <span className="cem-user-role">
+                              {(user.roles || []).map((role) => role.name).join(', ') || 'No role assigned'}
+                            </span>
+                            <span className="cem-user-last-login">
+                              {user.last_login_at ? `Last login: ${formatDisplayDateTime(user.last_login_at)}` : 'Never logged in'}
+                            </span>
+                            <div className="cem-user-actions">
+                              <button
+                                type="button"
+                                className="cem-user-action-btn status-toggle"
+                                onClick={() => onToggleCompanyUserStatus(user)}
+                              >
+                                {String(user.status || 'active').toLowerCase() === 'active' ? 'Deactivate User' : 'Activate User'}
+                              </button>
+                              <button
+                                type="button"
+                                className="cem-user-action-btn"
+                                onClick={() => onResetCompanyUserPassword(user)}
+                                disabled={!user.email || String(user.status || 'active').toLowerCase() !== 'active'}
+                                title={user.email ? 'Generate new password and send by email' : 'User has no email address'}
+                              >
+                                Reset Password
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    </>
+                  ) : (
+                    <div className="empty-state">
+                      <div className="empty-state-icon">👤</div>
+                      <h3>No registered users</h3>
+                      <p>This company does not have any tenant users assigned yet.</p>
+                    </div>
+                  )}
+
+                  {Array.isArray(viewingCompany.users) && viewingCompany.users.length > 0 && filteredViewingCompanyUsers.length === 0 ? (
+                    <div className="empty-state" style={{ marginTop: '12px' }}>
+                      <div className="empty-state-icon">🔎</div>
+                      <h3>No users in this filter</h3>
+                      <p>Switch filter to view other users.</p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
               {/* Finance + Notifications side by side */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="cem-split-grid">
                 <div className="cem-section">
                   <div className="cem-section-title"><span className="cem-section-icon">💰</span>Finance</div>
                   <div className="cem-section-body">
@@ -2164,15 +2496,15 @@ function App() {
               <div className="cem-section">
                 <div className="cem-section-title"><span className="cem-section-icon">🌿</span>Branding / Logos</div>
                 <div className="cem-section-body">
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                  <div className="cem-branding-view-grid">
                     {[
                       { label: 'Main Logo', path: viewingCompany.logo_path },
                       { label: 'Email Logo', path: viewingCompany.email_logo_path },
                       { label: 'Document Logo', path: viewingCompany.document_logo_path },
                     ].map(({ label, path }) => (
-                      <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
-                        <span className="cem-view-label" style={{ textAlign: 'center' }}>{label}</span>
-                        <div className="cem-logo-preview-box" style={{ width: '100%' }}>
+                      <div key={label} className="cem-branding-view-item">
+                        <span className="cem-view-label cem-view-label-center">{label}</span>
+                        <div className="cem-logo-preview-box cem-logo-preview-box-full">
                           {path
                             ? <img
                                 src={`${API_BASE_URL.replace('/api', '')}/storage/${path}`}

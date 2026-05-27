@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Mail\CompanyWelcomeCredentialsMail;
+use App\Mail\CompanyUserPasswordResetMail;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Company;
@@ -11,6 +13,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 class CompanyController extends Controller
 {
@@ -168,6 +172,20 @@ class CompanyController extends Controller
 
             DB::commit();
 
+            if (($data['notify_email'] ?? true) && ! empty($adminUser->email)) {
+                try {
+                    Mail::to($adminUser->email)->send(new CompanyWelcomeCredentialsMail(
+                        company: $company,
+                        adminName: $adminUser->name,
+                        adminEmail: $adminUser->email,
+                        plainPassword: $data['admin_password'],
+                        loginUrl: rtrim((string) config('app.url'), '/'),
+                    ));
+                } catch (\Throwable $mailException) {
+                    report($mailException);
+                }
+            }
+
             return response()->json([
                 'message' => 'Company created successfully.',
                 'company' => $company->only([
@@ -182,6 +200,13 @@ class CompanyController extends Controller
 
     public function show(Company $company): JsonResponse
     {
+        $company->load([
+            'users' => fn ($query) => $query
+                ->with('roles:id,name')
+                ->orderBy('name')
+                ->getQuery(),
+        ]);
+
         return response()->json($company);
     }
 
@@ -253,6 +278,112 @@ class CompanyController extends Controller
         return response()->json([
             'message' => 'Company updated successfully.',
             'company' => $company->fresh(),
+        ]);
+    }
+
+    public function resetCompanyUserPassword(Request $request, Company $company, CompanyUser $companyUser): JsonResponse
+    {
+        if ($companyUser->company_id !== $company->id) {
+            return response()->json([
+                'message' => 'User was not found for this company.',
+            ], 404);
+        }
+
+        if (! $companyUser->email) {
+            return response()->json([
+                'message' => 'Selected user does not have an email address.',
+            ], 422);
+        }
+
+        $plainPassword = Str::password(12, true, true, false, false);
+        $oldPasswordHash = $companyUser->password;
+
+        $companyUser->forceFill([
+            'password' => Hash::make($plainPassword),
+            'api_token' => null,
+        ])->save();
+
+        try {
+            Mail::to($companyUser->email)->send(new CompanyUserPasswordResetMail(
+                company: $company,
+                user: $companyUser,
+                plainPassword: $plainPassword,
+                loginUrl: rtrim((string) config('app.url'), '/'),
+            ));
+        } catch (\Throwable $mailException) {
+            $companyUser->forceFill([
+                'password' => $oldPasswordHash,
+            ])->save();
+
+            report($mailException);
+
+            return response()->json([
+                'message' => 'Password reset email could not be sent. No changes were saved.',
+            ], 500);
+        }
+
+        AuditLog::query()->create([
+            'actor_guard' => 'platform',
+            'actor_id' => $request->user('platform')?->id,
+            'company_id' => $company->id,
+            'action' => 'company.user_password_reset',
+            'auditable_type' => CompanyUser::class,
+            'auditable_id' => $companyUser->id,
+            'event_data' => [
+                'company_name' => $company->name,
+                'company_code' => $company->company_code,
+                'user_email' => $companyUser->email,
+                'user_name' => $companyUser->name,
+            ],
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'message' => 'Password reset successfully. New password has been sent to the user email.',
+        ]);
+    }
+
+    public function updateCompanyUserStatus(Request $request, Company $company, CompanyUser $companyUser): JsonResponse
+    {
+        if ($companyUser->company_id !== $company->id) {
+            return response()->json([
+                'message' => 'User was not found for this company.',
+            ], 404);
+        }
+
+        $data = $request->validate([
+            'status' => ['required', 'string', 'in:active,inactive'],
+        ]);
+
+        $companyUser->update([
+            'status' => $data['status'],
+            'api_token' => $data['status'] === 'inactive' ? null : $companyUser->api_token,
+        ]);
+
+        AuditLog::query()->create([
+            'actor_guard' => 'platform',
+            'actor_id' => $request->user('platform')?->id,
+            'company_id' => $company->id,
+            'action' => 'company.user_status_updated',
+            'auditable_type' => CompanyUser::class,
+            'auditable_id' => $companyUser->id,
+            'event_data' => [
+                'company_name' => $company->name,
+                'company_code' => $company->company_code,
+                'user_email' => $companyUser->email,
+                'user_name' => $companyUser->name,
+                'status' => $companyUser->status,
+            ],
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'message' => $companyUser->status === 'active'
+                ? 'User activated successfully.'
+                : 'User deactivated successfully. This user can no longer log in.',
+            'user' => $companyUser->fresh(['roles:id,name']),
         ]);
     }
 
